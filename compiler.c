@@ -46,6 +46,7 @@ typedef struct {
 Parser parser;
 Compiler* current = NULL;
 Chunk* compilingChunk;
+static Table stringConstants;
 
 static Chunk* currentChunk() {
   return compilingChunk;
@@ -141,8 +142,18 @@ static ParseRule* getRule(TokenType type);
 static void parsePrecedence(Precedence precedence);
 
 static uint8_t identifierConstant(Token* name) {
-  return makeConstant(OBJ_VAL(copyString(name->start,
-                                         name->length)));
+  // Reuse an existing constant slot when we've already emitted
+  // this identifier name in the current chunk.
+  ObjString* string = copyString(name->start, name->length);
+  Value indexValue;
+  if (tableGet(&stringConstants, OBJ_VAL(string), &indexValue)) {
+    return (uint8_t)AS_NUMBER(indexValue);
+  }
+
+  uint8_t index = makeConstant(OBJ_VAL(string));
+  tableSet(&stringConstants, OBJ_VAL(string),
+           NUMBER_VAL((double)index));
+  return index;
 }
 static uint8_t parseVariable(const char* errorMessage) {
   consume(TOKEN_IDENTIFIER, errorMessage);
@@ -350,12 +361,16 @@ static void statement() {
 
 bool compile(const char* source, Chunk* chunk) {
   initScanner(source);
+
   Compiler compiler;
   initCompiler(&compiler);
+
   compilingChunk = chunk;
 
   parser.hadError = false;
   parser.panicMode = false;
+
+  initTable(&stringConstants);
 
   advance();
 
@@ -364,5 +379,8 @@ bool compile(const char* source, Chunk* chunk) {
   }
 
   endCompiler();
+
+  freeTable(&stringConstants);
+
   return !parser.hadError;
 }
